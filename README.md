@@ -1,15 +1,15 @@
 # MSOP · 内部规程图形载体
 
 MUKE 的 SOP 文档里那些能点、能动的图，都由这个仓库托管。
-线上：<https://zanboooo.github.io/MSOP/>
+线上：<https://inetcoding.github.io/MSOP/>
 
-它和招聘门户 [`muke`](https://github.com/zanboooo/muke) 是**两个仓库、两条线**：
+它和招聘门户 [`muke`](https://github.com/inetcoding/muke) 是**两个仓库、两条线**：
 
 | | `muke` | `MSOP`（本仓库） |
 |---|---|---|
 | 面向 | 候选人 | 员工 / 内部规程 |
 | URL 出现在 | 招聘广告、二维码、经纪人链接 | 只在 Lark 文档与入职私信里 |
-| 数据 | `data/` 由 CI 每天 8 次自动生成 | 无自动同步，全是静态页 |
+| 数据 | `data/` 由 CI 每天 14 次自动生成 | 无自动同步，全是静态页 |
 | 改动频率 | 天 | 月 |
 
 **为什么要拆开：** 报名页的网址印在对外招聘物料上，任何人都能顺藤摸到仓库。
