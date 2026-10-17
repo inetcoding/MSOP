@@ -8,7 +8,7 @@ This is a staged server migration, not a replacement HR database. Lark Base rema
 - Initial direct Lark synchronization succeeded at `2026-10-17T18:41:00.125Z`, publishing 7 jobs with snapshot date `2026-10-18`. The server scheduler is enabled for 09:00–22:00 Asia/Jakarta; a future scheduled execution has not yet been observed.
 - The existing read application is reused through a private server configuration. No Lark business records or AnyCross versions were changed. GitHub synchronization remains available for the existing application flow.
 - Browser checks passed for language switching, search, priority filtering, job details, existing application redirection, and 390px layouts without horizontal overflow. Public unauthorized HR access returns 401; private data and source paths return 404.
-- Lark's exact HR callback is registered. The company owner's Lark identity was verified live, bound to the exact tenant and application-scoped open-ID allowlist, then successfully used to open the HR workspace showing its six Lark handoff links. The allowlist currently contains one account; real identity values remain only in the private server configuration. Temporary identity-only setup is now disabled. Six local security tests pass, including unapproved/wrong-tenant rejection; a second real Lark account has not been tested.
+- Lark's exact HR callback is registered. The company owner's Lark identity was verified live, bound to the exact tenant and application-scoped open-ID allowlist, then successfully used to open the HR workspace showing its six Lark handoff links. The allowlist currently contains one account; real identity values remain only in the private server configuration. Temporary identity-only setup is now disabled. Eleven local security and job-management tests pass, including unapproved/wrong-tenant rejection; a second real Lark account has not been tested.
 - Scout login remains disabled. Applications still redirect to the existing inetcoding GitHub Pages flow; form return URLs and attribution must be validated before switching it.
 
 ## What is implemented
@@ -16,7 +16,7 @@ This is a staged server migration, not a replacement HR database. Lark Base rema
 - Bilingual recruitment homepage, job search, priority filter and job details, using the existing published jobs schema.
 - Candidate referral aliases `a/agent/s/scout/r/ref` and `done` return links are forwarded to the established application flow. With `APPLICATIONS_ENABLED=0` (default), application links continue to the current inetcoding site with the complete query string.
 - Scout PIN verification happens on the server using the existing PBKDF2/AES-GCM format. Plaintext PINs are not stored; session cookies are HttpOnly. A changed/removed encrypted panel invalidates its session. Blank invitation URLs remain blank.
-- HR Lark OAuth with PKCE/state, exact tenant validation and an explicit administrator open-ID allowlist. HR workspace links open existing Lark pages; this version does not submit personnel mutations.
+- HR Lark OAuth with PKCE/state, exact tenant validation and an explicit administrator open-ID allowlist. HR workspace includes a live job catalog and private change drafts. Personnel actions remain links to existing Lark pages; this version does not submit Lark business mutations.
 - Private hourly sync worker, scheduled 09:00–22:00 Asia/Jakarta. Existing generator checks run with strict publication, and a successful generation is exposed by an atomic pointer switch. A failed generation leaves the previous one active. No notification messages are sent.
 - Docker Compose preview on server loopback, plus optional Caddy HTTPS configuration. No third-party npm runtime dependencies.
 
@@ -77,7 +77,21 @@ Use an SSH local port forward to preview on your computer. View `/`, `/hr/` and 
 ## Operational limits and recovery
 
 - Scout login is off by default (`SCOUT_LOGIN_ENABLED=0`). Enable it only after a live successful sync and active/inactive account tests. A successful sync less than 26 hours old is required; failed or stale sync blocks access. Inactive scout status also blocks login. Session revocation follows the next successful sync, with a maximum session lifetime of 30 minutes. Changes in Lark are not instant push notifications.
-- HR is an entry-point release, not a completed recruitment CRM. Attendance, transfers, field editing and workflow execution have not been recreated.
+- HR includes job viewing and private draft preparation, not a completed recruitment CRM. Publishing drafts, attendance, transfers and workflow execution have not been enabled.
 - Generation directories are retained for rollback; monitor disk usage. Failed generation cleanup and retention automation are not yet included. Do not expose `/var/lib/muke` via a generic file server.
 - A stale `sync.lock` causes the worker to fail closed. Before removing it, confirm no sync process is running. Restart app services to revoke all sessions.
 - Rollback source commits with normal git checkout after preserving configuration, then rebuild. To roll back data, replace `CURRENT` atomically with a previously validated generation name. Never copy private runtime files to the repositories.
+
+## Job management stage — 2026-10-18
+
+`/hr/jobs/` is available only to the existing tenant/open-ID allowlist. Its API reads the minimum recruitment fields from A01/H22/H28 using the existing read credential; it does not read applicant identities or employee profiles. A successful result is cached for at most 60 seconds. Field-type mismatch or incomplete pagination fails closed. No stale result is substituted for a failed fresh read.
+
+Live field inspection confirmed 16 A01 requirements and 51 H28 registry rows. A01 `Status` is a single-select with 未开始 / 进行中 / 已停止 / 已完成. `申请状态` is a separate approval result and is not editable in drafts. `Job-ID` and `JID` are lookups into H22; neither is a write target. `Goal` is numeric, 紧急程度 is a single-select, 到岗期限 is a date, and the two H22 JD columns are text. A01 also links to A02 tasks and A03 agents. New requirements need approval/automation review before a live create API can be introduced.
+
+- View all positions, search, filter open/closed positions, inspect recruitment batches and H28 form readiness. “Configured” checks registry presence, unique mapping, inactive status and HTTPS Lark URL shape; it does not claim that form submission or return URLs have been tested.
+- Prepare a draft for an existing batch or a new batch of an already configured position. Preview exact differences and the number of batches that would remain open. Editing the shared H22 JD warns that all batches use it.
+- Save and archive drafts only in `/var/lib/muke-drafts/job-drafts.json`, a private app-only writable mount. Archive retains records. Writes use an in-process queue and atomic rename; deployment supports one app replica. Back up this directory separately alongside private deployment configuration.
+- Drafts contain the source revision, exact before/after values, creation time and author. Duplicate submissions are idempotent while the matching draft remains active. Fresh Lark reads reject saves based on changed source data; saved drafts display a source-changed warning on later reads.
+- There is deliberately no publish/write-to-Lark endpoint. Approvals, live A01 changes, the public generator, existing GitHub sync and candidate form return settings stay as they were. No public route serves draft files.
+
+Before deploying this stage, create `/var/lib/muke-drafts` owned by UID/GID 1000 with mode 0750, then rebuild only `app`. This does not require restarting the sync worker. App restart expires existing HR sessions; sign in with Lark again. Local test fixture persistence is verified in a writable workspace temporary directory; tests do not create business records.
