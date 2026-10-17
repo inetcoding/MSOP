@@ -17,5 +17,5 @@ if [ ! -e .env ]; then
 fi
 docker compose config --quiet
 docker compose up -d --build app sync
-curl --fail --silent --show-error http://127.0.0.1:8080/healthz
+curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/healthz
 printf '\nPreview listens only on server loopback. No DNS or firewall change was made.\n'
