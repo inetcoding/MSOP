@@ -1,8 +1,20 @@
 # Do not enable access logs containing candidate query strings or OAuth codes.
-{$JOBS_HOST:jobs.muke.media}, {$HR_HOST:hr.muke.media} {
+(muke_common) {
   encode zstd gzip
   header Strict-Transport-Security "max-age=31536000"
   reverse_proxy app:3000 {
     header_up X-Real-IP {remote_host}
   }
+}
+
+{$JOBS_HOST:jobs.muke.media} {
+  @hr path /hr /hr/* /auth/lark /auth/lark/*
+  redir @hr https://{$HR_HOST:hr.muke.media}{uri} 302
+  import muke_common
+}
+
+{$HR_HOST:hr.muke.media} {
+  @home path / /hr
+  redir @home /hr/ 302
+  import muke_common
 }
