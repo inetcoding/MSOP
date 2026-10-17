@@ -11,6 +11,7 @@ function option(label,v){const o=el('option',label);o.value=v;return o;}
 const formNames={cv:'简历',bg:'背调',ex:'测评'},formStates={configured:'已配置',missing:'缺失',inactive:'已停用',duplicate:'重复',invalid:'链接异常'};
 function hasIssue(job){return Object.values(job.forms).some(s=>s!=='configured');}
 function render(){
+ const sync=catalog.sync;$('#sync-state').textContent=sync?(sync.ok?'招聘页最近同步成功：':'最近一次同步未成功，招聘页仍使用上一版。上次成功：')+(sync.lastSuccessAt?time(sync.lastSuccessAt)+'（雅加达）':'暂无记录')+' · 自动同步时段 09:00–22:00，每小时一次。':'暂时无法读取招聘页同步状态。';
  const open=catalog.jobs.filter(j=>j.activeBatches>0);$('#open-count').textContent=open.length;$('#batch-count').textContent=open.reduce((n,j)=>n+j.activeBatches,0);$('#draft-count').textContent=catalog.drafts.filter(d=>d.state==='draft').length;
  $('#read-time').textContent='读取：'+time(catalog.fetchedAt)+'（雅加达）';
  const q=$('#search').value.trim().toLowerCase(),filter=$('#filter').value;

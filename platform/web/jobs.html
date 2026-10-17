@@ -7,6 +7,7 @@
 <div id="manager" hidden>
 <section class="stats" aria-label="岗位概况"><div><span>当前在招岗位</span><strong id="open-count">—</strong></div><div><span>进行中的招聘批次</span><strong id="batch-count">—</strong></div><div><span>未发布草稿</span><strong id="draft-count">—</strong></div></section>
 <div class="notice stage-note"><strong>当前可查看岗位、保存草稿。</strong> 正式发布、停止招聘仍在 <a id="base-link" target="_blank" rel="noopener noreferrer">Lark 招聘需求 ↗</a> 中办理。草稿不会改变招聘页或现有报名流程。</div>
+<p id="sync-state" class="helper" role="status"></p>
 <div class="section-title"><h2>岗位与需求</h2><button id="refresh">刷新数据 ↻</button></div>
 <div class="toolbar"><label class="search-label">搜索岗位<input id="search" type="search" placeholder="岗位名称 / 岗位代码" maxlength="80"></label><label>显示范围<select id="filter"><option value="open">当前在招</option><option value="all">全部岗位</option><option value="closed">未在招</option><option value="issues">报名配置待检查</option></select></label><span id="read-time"></span></div>
 <div id="jobs" class="job-list"></div><p id="empty" class="empty" hidden>没有符合条件的岗位。</p>

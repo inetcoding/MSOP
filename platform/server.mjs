@@ -45,7 +45,8 @@ export function createHandler(config,dependencies={}){
   if(!limiter.take('jobs:'+s.openId,120,60000))throw {status:429};
   if(req.method==='GET'&&p==='/api/hr/jobs'){
    const catalog=await readCatalog();let published=null;try{const snapshot=await jsonFile('jobs.json');published={stamp:snapshot.stamp||'',names:snapshot.jobs.filter(j=>j.open).map(j=>j.cn)};}catch{}
-   return reply(res,200,{...catalog,published,drafts:await drafts.list(catalog)});
+   let sync=null;try{const s=JSON.parse(await fs.readFile(path.join(config.data,'sync-status.json'),'utf8'));sync={ok:s.ok===true,attemptAt:s.at||null,lastSuccessAt:s.lastSuccessAt||(s.ok?s.at:null)};}catch{}
+   return reply(res,200,{...catalog,published,sync,drafts:await drafts.list(catalog)});
   }
   if(req.method!=='POST')throw {status:405};if(!allowedOrigin(req,[config.hrOrigin]))throw {status:403};
   if(p==='/api/hr/job-drafts/archive'){const b=await body(req);await drafts.archive(b.id,s);return reply(res,200,{ok:true});}
