@@ -8,4 +8,4 @@ export async function oauthUser(code,verifier,config){
  if(!t.access_token)throw Error('Missing access token');
  const info=await lark('/open-apis/authen/v1/user_info',{token:t.access_token});return info.data;
 }
-export function authorizationUrl(state,challenge,config){const u=new URL(ROOT+'/open-apis/authen/v1/authorize');Object.entries({client_id:config.appId,response_type:'code',redirect_uri:config.hrOrigin+'/auth/lark/callback',state,code_challenge:challenge,code_challenge_method:'S256'}).forEach(([k,v])=>u.searchParams.set(k,v));return u.toString();}
+export function authorizationUrl(state,challenge,config){const u=new URL('https://accounts.larksuite.com/open-apis/authen/v1/authorize');Object.entries({client_id:config.appId,response_type:'code',redirect_uri:config.hrOrigin+'/auth/lark/callback',state,code_challenge:challenge,code_challenge_method:'S256'}).forEach(([k,v])=>u.searchParams.set(k,v));return u.toString();}

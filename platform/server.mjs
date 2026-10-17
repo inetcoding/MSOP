@@ -7,10 +7,13 @@ import {safeCode,cookies,allowedOrigin,authorizedHR,Limiter,SessionStore,decrypt
 import {authorizationUrl,oauthUser} from './lark.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.json':'application/json; charset=utf-8','.png':'image/png','.webp':'image/webp'};
-export function configFromEnv(env=process.env){return {port:Number(env.PORT||3000),host:env.HOST||'127.0.0.1',muke:path.resolve(env.MUKE_REPO||path.join(HERE,'../../muke')),data:path.resolve(env.MUKE_PRIVATE_DATA||path.join(HERE,'.runtime')),jobsOrigin:env.JOBS_ORIGIN||'http://127.0.0.1:3000',hrOrigin:env.HR_ORIGIN||'http://127.0.0.1:3000',production:env.NODE_ENV==='production',proxy:env.TRUST_PROXY==='1',appId:env.LARK_LOGIN_APP_ID||'',appSecret:env.LARK_LOGIN_APP_SECRET||'',tenant:env.LARK_TENANT_KEY||'',hrIds:(env.HR_ADMIN_OPEN_IDS||'').split(',').map(s=>s.trim()).filter(Boolean),base:env.LARK_BASE_TOKEN||'',syncConfigured:!!(env.LARK_APP_ID&&env.LARK_APP_SECRET&&env.LARK_BASE_TOKEN),applyEnabled:env.APPLICATIONS_ENABLED==='1'};}
+export function configFromEnv(env=process.env){return {port:Number(env.PORT||3000),host:env.HOST||'127.0.0.1',muke:path.resolve(env.MUKE_REPO||path.join(HERE,'../../muke')),data:path.resolve(env.MUKE_PRIVATE_DATA||path.join(HERE,'.runtime')),jobsOrigin:env.JOBS_ORIGIN||'http://127.0.0.1:3000',hrOrigin:env.HR_ORIGIN||'http://127.0.0.1:3000',production:env.NODE_ENV==='production',proxy:env.TRUST_PROXY==='1',identitySetup:env.HR_IDENTITY_SETUP_ENABLED==='1',appId:env.LARK_LOGIN_APP_ID||'',appSecret:env.LARK_LOGIN_APP_SECRET||'',tenant:env.LARK_TENANT_KEY||'',hrIds:(env.HR_ADMIN_OPEN_IDS||'').split(',').map(s=>s.trim()).filter(Boolean),base:env.LARK_BASE_TOKEN||'',syncConfigured:!!(env.LARK_APP_ID&&env.LARK_APP_SECRET&&env.LARK_BASE_TOKEN),applyEnabled:env.APPLICATIONS_ENABLED==='1'};}
 export function createHandler(config,dependencies={}){
  const sessions=new SessionStore(),pending=new SessionStore(),limiter=new Limiter();
  const getUser=dependencies.oauthUser||oauthUser;
+ const identitySetup=config.identitySetup===true;
+ const hrConfigured=!!(config.appId&&config.appSecret&&config.tenant&&config.hrIds.length);
+ const loginAvailable=!!(config.appId&&config.appSecret&&(hrConfigured||identitySetup));
  const origins=[config.jobsOrigin,config.hrOrigin];
  if(config.production&&origins.some(o=>!o.startsWith('https://')))throw Error('Production requires HTTPS origins');
  const secure=config.production?'; Secure':'';
@@ -30,7 +33,10 @@ export function createHandler(config,dependencies={}){
  if((req.url||'').length>8192)throw {status:414};
  if(req.method==='GET'&&p==='/healthz')return reply(res,200,{ok:true,version:'0.1.0'});
  if(req.method==='GET'&&p==='/api/public-status')return reply(res,200,{syncConfigured:config.syncConfigured,applicationsEnabled:config.applyEnabled});
- if(req.method==='GET'&&p==='/api/session'){const s=sessions.get(cookies(req).muke_session);return reply(res,200,{user:s?{name:s.name,role:s.role}:null,hrConfigured:!!(config.appId&&config.appSecret&&config.tenant&&config.hrIds.length)});}
+ if(req.method==='GET'&&p==='/api/session'){const s=sessions.get(cookies(req).muke_session);return reply(res,200,{user:s?{name:s.name,role:s.role}:null,hrConfigured,loginAvailable,identitySetup});}
+ if(req.method==='GET'&&p==='/api/hr/identity'){
+  const s=sessions.get(cookies(req).muke_session);if(!identitySetup||!s||s.role!=='identity'||(config.tenant&&s.tenant!==config.tenant))throw {status:401};return reply(res,200,{name:s.name,openId:s.openId,tenant:s.tenant});
+ }
  if(req.method==='POST'&&p==='/api/logout'){if(!allowedOrigin(req,origins))throw {status:403};sessions.delete(cookies(req).muke_session);return reply(res,200,{ok:true},{'Set-Cookie':cookie('muke_session','',0)});}
  if(req.method==='POST'&&p==='/api/partner/login'){
   if(!await scoutReady())throw {status:503};
@@ -43,10 +49,13 @@ export function createHandler(config,dependencies={}){
   const panel={...s.panel};if(panel.invite){try{const url=new URL(panel.invite);if(!['inetcoding.github.io','zanboooo.github.io',new URL(config.jobsOrigin).hostname].includes(url.hostname))throw Error();if(!/^\/(muke\/)?join\/?$/.test(url.pathname))throw Error();panel.invite=config.jobsOrigin+'/join/'+url.search+url.hash;}catch{panel.invite='';}}return reply(res,200,panel);
  }
  if(req.method==='GET'&&p==='/auth/lark'){
-  if(!config.appId||!config.appSecret||!config.tenant||!config.hrIds.length)throw {status:503};if(!limiter.take('oauth:'+client(req),20))throw {status:429};const verifier=nonce();const id=pending.set({verifier},5*60000);return redirect(res,authorizationUrl(id,createHash('sha256').update(verifier).digest('base64url'),config),{'Set-Cookie':cookie('muke_oauth',id,300)});
+  if(!loginAvailable)throw {status:503};if(!limiter.take('oauth:'+client(req),20))throw {status:429};const verifier=nonce();const id=pending.set({verifier},5*60000);return redirect(res,authorizationUrl(id,createHash('sha256').update(verifier).digest('base64url'),config),{'Set-Cookie':cookie('muke_oauth',id,300)});
  }
  if(req.method==='GET'&&p==='/auth/lark/callback'){
-  const state=u.searchParams.get('state'),saved=cookies(req).muke_oauth;const flow=pending.get(state);if(!state||state!==saved||!flow)throw {status:403};pending.delete(state);if(!u.searchParams.get('code'))throw {status:400};const user=await getUser(u.searchParams.get('code'),flow.verifier,config);if(!authorizedHR(user,config))throw {status:403};const id=sessions.set({role:'hr',name:user.name||user.en_name||'HR',openId:user.open_id,tenant:user.tenant_key},4*3600000);return redirect(res,config.hrOrigin+'/hr/',{'Set-Cookie':[cookie('muke_session',id,14400),cookie('muke_oauth','',0)]});
+  const state=u.searchParams.get('state'),saved=cookies(req).muke_oauth;const flow=pending.get(state);if(!state||state!==saved||!flow)throw {status:403};pending.delete(state);if(!u.searchParams.get('code'))throw {status:400};const user=await getUser(u.searchParams.get('code'),flow.verifier,config);
+  if(!user||typeof user.open_id!=='string'||!user.open_id||typeof user.tenant_key!=='string'||!user.tenant_key)throw {status:403};
+  const approved=authorizedHR(user,config);if(!approved&&(!identitySetup||(config.tenant&&user.tenant_key!==config.tenant)))throw {status:403};
+  const seconds=approved?14400:600;const id=sessions.set({role:approved?'hr':'identity',name:user.name||user.en_name||'Lark 用户',openId:user.open_id,tenant:user.tenant_key},seconds*1000);return redirect(res,config.hrOrigin+'/hr/',{'Set-Cookie':[cookie('muke_session',id,seconds),cookie('muke_oauth','',0)]});
  }
  if(req.method==='GET'&&p==='/api/hr/workspace'){
   const s=sessions.get(cookies(req).muke_session);if(!s||s.role!=='hr'||!authorizedHR({open_id:s.openId,tenant_key:s.tenant},config))throw {status:401};if(!config.base)throw {status:503};const base='https://mukestar.jp.larksuite.com/base/'+encodeURIComponent(config.base);return reply(res,200,{name:s.name,mode:'lark-handoff',links:[{title:'招聘需求',label:'A01 · 岗位与需求',url:base+'?table=tblDDCntGCkEmWnK'},{title:'简历跟进',label:'A05 · 候选人简历',url:base+'?table=tblyxgrrFk1Jzy6e'},{title:'面试评估',label:'A08 · 面试记录',url:base+'?table=tblQKNfszw1LKvUJ'},{title:'招聘总评',label:'A09 · 综合评估',url:base+'?table=tbl53EDnftILW69E'},{title:'员工档案',label:'H01 · 入职与人员档案',url:base+'?table=tbl0IXzgKcVRJetS'},{title:'星探管理',label:'A04 · 推荐渠道',url:base+'?table=tbloM0cxrKR4kOyC'}]});

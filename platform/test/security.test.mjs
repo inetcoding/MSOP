@@ -41,3 +41,19 @@ test('OAuth binds state to browser, uses PKCE and consumes callback once',async(
  const good=await request(url,cookie);assert.equal(good.status,303);assert.equal(good.headers.get('location'),'https://hr.example.com/hr/');assert.ok(good.headers.get('set-cookie').every(c=>c.includes('; Secure')));assert.equal(tokenCalls,1);
  assert.equal((await request(url,cookie)).status,403);assert.equal(tokenCalls,1);
 });
+
+test('identity-only setup never grants HR access and rejects a different configured tenant',async()=>{
+ const config={...configFromEnv({}),production:true,jobsOrigin:'https://jobs.example.com',hrOrigin:'https://hr.example.com',appId:'fixture-client',appSecret:randomBytes(16).toString('hex'),identitySetup:true};
+ function harness(options,user){const handle=createHandler(options,{oauthUser:async()=>user});return async(url,cookie='')=>{const req=Readable.from([]);req.url=url;req.method='GET';req.headers={cookie};req.socket={remoteAddress:'127.0.0.1'};let status=200,body='';const headers=new Map();await handle(req,{setHeader(k,v){headers.set(k.toLowerCase(),v);},writeHead(s,h={}){status=s;for(const[k,v]of Object.entries(h))headers.set(k.toLowerCase(),v);},end(value=''){body+=value;}});return {status,headers,body};};}
+ async function login(request){const start=await request('/auth/lark');if(start.status!==303)return start;const state=new URL(start.headers.get('location')).searchParams.get('state');return request('/auth/lark/callback?state='+state+'&code=fixture-code',start.headers.get('set-cookie').split(';')[0]);}
+ const user={name:'Fixture Owner',open_id:'fixture-user',tenant_key:'fixture-company'};
+ const request=harness(config,user);assert.equal((await request('/api/hr/identity')).status,401);
+ const verified=await login(request);assert.equal(verified.status,303);const cookie=verified.headers.get('set-cookie')[0].split(';')[0];assert.match(verified.headers.get('set-cookie')[0],/Max-Age=600; Secure/);
+ assert.equal((await request('/api/hr/workspace',cookie)).status,401);
+ const identity=await request('/api/hr/identity',cookie);assert.equal(identity.status,200);assert.deepEqual(JSON.parse(identity.body),{name:user.name,openId:user.open_id,tenant:user.tenant_key});
+ const session=JSON.parse((await request('/api/session',cookie)).body);assert.equal(session.user.role,'identity');assert.equal(session.hrConfigured,false);assert.equal(session.loginAvailable,true);assert.equal(session.user.openId,undefined);
+ assert.equal((await login(harness({...config,identitySetup:false},user))).status,503);
+ assert.equal((await login(harness({...config,tenant:'other-company'},user))).status,403);
+ assert.equal((await login(harness(config,{name:'Missing identity'}))).status,403);
+ const closed=harness({...config,identitySetup:false,tenant:user.tenant_key,hrIds:['someone-else']},user);assert.equal((await login(closed)).status,403);
+});
