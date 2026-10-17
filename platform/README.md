@@ -2,6 +2,14 @@
 
 This is a staged server migration, not a replacement HR database. Lark Base remains the source of record. The public recruitment frontend stays in `inetcoding/muke/portal`; the service and internal entry points stay in `inetcoding/MSOP/platform`.
 
+## Deployment checkpoint — 2026-10-18 Asia/Jakarta
+
+- `https://jobs.muke.media/` and `https://hr.muke.media/` are served by the Debian Docker deployment with valid Let's Encrypt certificates and HTTP-to-HTTPS redirects. The HR hostname opens `/hr/`.
+- Initial direct Lark synchronization succeeded at `2026-10-17T18:41:00.125Z`, publishing 7 jobs with snapshot date `2026-10-18`. The server scheduler is enabled for 09:00–22:00 Asia/Jakarta; a future scheduled execution has not yet been observed.
+- The existing read application is reused through a private server configuration. No Lark business records or AnyCross versions were changed. GitHub synchronization remains available for the existing application flow.
+- Browser checks passed for language switching, search, priority filtering, job details, existing application redirection, and 390px layouts without horizontal overflow. Public unauthorized HR access returns 401; private data and source paths return 404.
+- HR OAuth remains disabled pending redirect registration, tenant verification and an explicit HR open-ID allowlist. Scout login remains disabled. Applications still redirect to the existing inetcoding GitHub Pages flow; form return URLs and attribution must be validated before switching it.
+
 ## What is implemented
 
 - Bilingual recruitment homepage, job search, priority filter and job details, using the existing published jobs schema.
