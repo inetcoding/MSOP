@@ -113,3 +113,31 @@ Empty verified job lists have their own public “no open positions” message. 
 The HR job page shows the last successful website sync and a failure indication when the latest attempt failed. Schedule remains 09:00–22:00 Asia/Jakarta; failed hourly runs are retried at the next scheduled slot. A manually triggered `node sync.mjs --once` is available to the server operator. Seventeen tests cover the live generator against synthetic inputs, normal/complete stops, reopening, pagination failures and atomic preservation of a prior generation. Tests never stop real jobs.
 
 Deploy the matching migration branches of both repositories before rebuilding app and sync; `platform/sync.mjs` depends on `muke/tools/publication.js`. Run container tests, then a single read-only-source sync to establish the checkpoint. Recreate the services only after this succeeds. App recreation expires HR sessions.
+
+## Access boundary stage — 2026-10-18
+
+`access.mjs` separates a verified Lark identity from platform capabilities. Every `/api/hr/` request is authenticated before business reads. Job reads and draft preview/create/archive each require an explicit capability; there are no wildcard grants, business publishing APIs, or permission-management APIs. Unknown capabilities are denied.
+
+The private server policy uses this schema (fixture identities only):
+
+```json
+{
+  "version": 1,
+  "revision": "reviewed-change-reference",
+  "tenant": "fixture-company",
+  "loginAppId": "fixture-login-app",
+  "subjects": [{"openId": "fixture-owner", "role": "owner", "active": true}]
+}
+```
+
+Set `HR_ACCESS_POLICY_FILE=/access/policy.json` only after installing the reviewed private file in `/var/lib/muke-access`, mounted read-only into app. Keep this directory and its backups outside git and public files. The app must be able to read the file (UID/GID 1000). Update it by validated atomic replacement; malformed/missing files fail closed with 503 and never fall back to `HR_ADMIN_OPEN_IDS`. Policy tenant and login application must exactly match the configured identity provider. Do not reuse open IDs from a different application.
+
+The complete policy content is checked on every protected request. Any change invalidates old HR sessions, even if an operator forgets to change the revision label. Disabling/removing an account blocks a new login; approved accounts can sign in again after a reviewed update. This is server policy revocation, not an automatic Lark departure/role-change subscription. A policy outage denies requests without revealing its contents.
+
+Only `owner` currently receives application-identity job reads and private draft capabilities. `hr`, `agent`, `manager`, `finance`, and `employee` are handoff-only roles: they may receive relevant Lark navigation links, which remain subject to Lark's own login and permissions. They cannot read the application catalog or create/archive drafts through API calls. Creating these role definitions does not assign any real employee or grant Base permissions. The deployed policy must initially contain only the already approved owner. H25/business role labels must not automatically confer platform ownership.
+
+This stage intentionally does not copy Base's full row/field policy into code or claim to impersonate users. User-identity data scopes, private cache isolation, effective membership reconciliation, attachment/export checks, deprovisioning events and live multi-account verification are prerequisites before expanding direct business access. User-identity errors must never trigger an application-identity fallback. Existing Base automations and AnyCross execution rights remain separate and unchanged.
+
+Without a configured policy file, the existing explicit administrator IDs retain bootstrap compatibility. Production uses the private file. Role or membership expansion requires separate review; do not add staff to the administrator list as a shortcut.
+
+Verification includes real request-handler tests for handoff-role isolation, denied spoofed role payloads, unlisted/wrong-company login rejection, policy failures without administrator fallback, immediate rejection of stale sessions, fresh re-login, and absence of publish/permission-management endpoints. These use synthetic identities and do not alter production permissions or data.

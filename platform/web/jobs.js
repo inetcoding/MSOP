@@ -1,7 +1,7 @@
 'use strict';
 const $=s=>document.querySelector(s),form=$('#edit-form'),dialog=$('#editor');
 let catalog,selected,payload,currentDraft;
-const messages={source_changed:'Lark 数据已变化。请关闭编辑、刷新岗位后重新核对。',schema_changed:'Lark 字段结构已变化，请先核对配置。',no_changes:'还没有修改内容。',invalid_goal:'招聘目标须为 1–10000 的整数。',incomplete_requirement:'请完整填写新增招聘批次。',job_unavailable:'该岗位尚未完成招聘配置。',draft_capacity:'草稿数量已达上限，请联系管理员整理。'};
+const messages={permission_denied:'你没有此项操作权限，请联系管理员。',access_policy_unavailable:'访问权限暂时无法核验，请稍后重试。',source_changed:'Lark 数据已变化。请关闭编辑、刷新岗位后重新核对。',schema_changed:'Lark 字段结构已变化，请先核对配置。',no_changes:'还没有修改内容。',invalid_goal:'招聘目标须为 1–10000 的整数。',incomplete_requirement:'请完整填写新增招聘批次。',job_unavailable:'该岗位尚未完成招聘配置。',draft_capacity:'草稿数量已达上限，请联系管理员整理。'};
 function errorText(e){return messages[e.code]||(e.status===401?'登录已失效，请重新登录。':e.status===429?'操作较频繁，请稍后重试。':'暂时无法完成，请稍后重试。');}
 async function api(url,options={}){const r=await fetch(url,{cache:'no-store',...options});const body=await r.json();if(!r.ok)throw Object.assign(Error(),{status:r.status,code:body.code});return body;}
 function post(url,data){return api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});}
@@ -30,7 +30,7 @@ function render(){
 async function load(){
  $('#refresh').disabled=true;$('#status').hidden=false;$('#status').textContent='正在读取 Lark 岗位与需求…';
  try{catalog=await api('/api/hr/jobs');$('#manager').hidden=false;$('#login').hidden=true;$('#logout').hidden=false;render();$('#status').hidden=!catalog.unmappedRequirements;$('#status').textContent=catalog.unmappedRequirements+' 条招聘需求未匹配到 H22 岗位，请在 Lark 中核对。';}
- catch(e){$('#status').textContent=errorText(e);if(e.status===401){$('#manager').hidden=true;$('#login').hidden=false;$('#logout').hidden=true;}}
+ catch(e){$('#status').textContent=errorText(e);if([401,403,503].includes(e.status)){catalog=null;$('#manager').hidden=true;$('#jobs').replaceChildren();$('#drafts').replaceChildren();dialog.close();form.reset();$('#login').hidden=e.status!==401;$('#logout').hidden=e.status===401;}}
  finally{$('#refresh').disabled=false;}
 }
 function fillBatch(){

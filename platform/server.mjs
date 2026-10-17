@@ -3,19 +3,21 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
-import {safeCode,cookies,allowedOrigin,authorizedHR,Limiter,SessionStore,decryptPanel,publicPanel,hash,nonce} from './security.mjs';
+import {safeCode,cookies,allowedOrigin,Limiter,SessionStore,decryptPanel,publicPanel,hash,nonce} from './security.mjs';
 import {authorizationUrl,oauthUser} from './lark.mjs';
 import {createCatalogReader,DraftStore,prepareDraft,publicDraft} from './jobs.mjs';
+import {createAccessControl,workspaceLinks} from './access.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.json':'application/json; charset=utf-8','.png':'image/png','.webp':'image/webp'};
-export function configFromEnv(env=process.env){return {port:Number(env.PORT||3000),host:env.HOST||'127.0.0.1',muke:path.resolve(env.MUKE_REPO||path.join(HERE,'../../muke')),data:path.resolve(env.MUKE_PRIVATE_DATA||path.join(HERE,'.runtime')),jobsOrigin:env.JOBS_ORIGIN||'http://127.0.0.1:3000',hrOrigin:env.HR_ORIGIN||'http://127.0.0.1:3000',production:env.NODE_ENV==='production',proxy:env.TRUST_PROXY==='1',identitySetup:env.HR_IDENTITY_SETUP_ENABLED==='1',appId:env.LARK_LOGIN_APP_ID||'',appSecret:env.LARK_LOGIN_APP_SECRET||'',tenant:env.LARK_TENANT_KEY||'',hrIds:(env.HR_ADMIN_OPEN_IDS||'').split(',').map(s=>s.trim()).filter(Boolean),base:env.LARK_BASE_TOKEN||'',readAppId:env.LARK_APP_ID||'',readAppSecret:env.LARK_APP_SECRET||'',drafts:path.resolve(env.MUKE_DRAFT_DATA||path.join(HERE,'.runtime/drafts')),syncConfigured:!!(env.LARK_APP_ID&&env.LARK_APP_SECRET&&env.LARK_BASE_TOKEN),applyEnabled:env.APPLICATIONS_ENABLED==='1'};}
+export function configFromEnv(env=process.env){return {port:Number(env.PORT||3000),host:env.HOST||'127.0.0.1',muke:path.resolve(env.MUKE_REPO||path.join(HERE,'../../muke')),data:path.resolve(env.MUKE_PRIVATE_DATA||path.join(HERE,'.runtime')),jobsOrigin:env.JOBS_ORIGIN||'http://127.0.0.1:3000',hrOrigin:env.HR_ORIGIN||'http://127.0.0.1:3000',production:env.NODE_ENV==='production',proxy:env.TRUST_PROXY==='1',identitySetup:env.HR_IDENTITY_SETUP_ENABLED==='1',appId:env.LARK_LOGIN_APP_ID||'',appSecret:env.LARK_LOGIN_APP_SECRET||'',tenant:env.LARK_TENANT_KEY||'',hrIds:(env.HR_ADMIN_OPEN_IDS||'').split(',').map(s=>s.trim()).filter(Boolean),accessFile:env.HR_ACCESS_POLICY_FILE?path.resolve(env.HR_ACCESS_POLICY_FILE):'',base:env.LARK_BASE_TOKEN||'',readAppId:env.LARK_APP_ID||'',readAppSecret:env.LARK_APP_SECRET||'',drafts:path.resolve(env.MUKE_DRAFT_DATA||path.join(HERE,'.runtime/drafts')),syncConfigured:!!(env.LARK_APP_ID&&env.LARK_APP_SECRET&&env.LARK_BASE_TOKEN),applyEnabled:env.APPLICATIONS_ENABLED==='1'};}
 export function createHandler(config,dependencies={}){
  const sessions=new SessionStore(),pending=new SessionStore(),limiter=new Limiter();
  const readCatalog=dependencies.readCatalog||createCatalogReader(config);
  const drafts=dependencies.draftStore||new DraftStore(config.drafts||path.join(config.data,'drafts'));
  const getUser=dependencies.oauthUser||oauthUser;
+ const access=createAccessControl(config,dependencies.accessOptions);
  const identitySetup=config.identitySetup===true;
- const hrConfigured=!!(config.appId&&config.appSecret&&config.tenant&&config.hrIds.length);
+ const hrConfigured=!!(config.appId&&config.appSecret&&config.tenant&&(config.hrIds.length||config.accessFile));
  const loginAvailable=!!(config.appId&&config.appSecret&&(hrConfigured||identitySetup));
  const origins=[config.jobsOrigin,config.hrOrigin];
  if(config.production&&origins.some(o=>!o.startsWith('https://')))throw Error('Production requires HTTPS origins');
@@ -36,19 +38,23 @@ export function createHandler(config,dependencies={}){
  if((req.url||'').length>8192)throw {status:414};
  if(req.method==='GET'&&p==='/healthz')return reply(res,200,{ok:true,version:'0.1.0'});
  if(req.method==='GET'&&p==='/api/public-status')return reply(res,200,{syncConfigured:config.syncConfigured,applicationsEnabled:config.applyEnabled});
- if(req.method==='GET'&&p==='/api/session'){const s=sessions.get(cookies(req).muke_session);return reply(res,200,{user:s?{name:s.name,role:s.role}:null,hrConfigured,loginAvailable,identitySetup});}
+ if(req.method==='GET'&&p==='/api/session'){const id=cookies(req).muke_session;let s=sessions.get(id);if(s?.role==='hr'&&!await access.current(s)){sessions.delete(id);s=null;}return reply(res,200,{user:s?{name:s.name,role:s.role}:null,hrConfigured,loginAvailable,identitySetup});}
  if(req.method==='GET'&&p==='/api/hr/identity'){
   const s=sessions.get(cookies(req).muke_session);if(!identitySetup||!s||s.role!=='identity'||(config.tenant&&s.tenant!==config.tenant))throw {status:401};return reply(res,200,{name:s.name,openId:s.openId,tenant:s.tenant});
  }
+ let principal=null,s=null;
+ if(p.startsWith('/api/hr/')){s=sessions.get(cookies(req).muke_session);principal=await access.current(s);if(!principal){if(s?.role==='hr')sessions.delete(cookies(req).muke_session);throw {status:401};}}
+ if(req.method==='GET'&&p==='/api/hr/access'){access.requireCapability(principal,'workspace.view');return reply(res,200,{role:principal.accessRole,label:principal.label,capabilities:principal.capabilities});}
  if(p==='/api/hr/jobs'||p.startsWith('/api/hr/job-drafts')){
-  const s=sessions.get(cookies(req).muke_session);if(!s||s.role!=='hr'||!authorizedHR({open_id:s.openId,tenant_key:s.tenant},config))throw {status:401};
   if(!limiter.take('jobs:'+s.openId,120,60000))throw {status:429};
   if(req.method==='GET'&&p==='/api/hr/jobs'){
+   access.requireCapability(principal,'jobs.read');
    const catalog=await readCatalog();let published=null;try{const snapshot=await jsonFile('jobs.json');published={stamp:snapshot.stamp||'',names:snapshot.jobs.filter(j=>j.open).map(j=>j.cn)};}catch{}
    let sync=null;try{const s=JSON.parse(await fs.readFile(path.join(config.data,'sync-status.json'),'utf8'));sync={ok:s.ok===true,attemptAt:s.at||null,lastSuccessAt:s.lastSuccessAt||(s.ok?s.at:null)};}catch{}
    return reply(res,200,{...catalog,published,sync,drafts:await drafts.list(catalog)});
   }
   if(req.method!=='POST')throw {status:405};if(!allowedOrigin(req,[config.hrOrigin]))throw {status:403};
+  const capability=({'/api/hr/job-drafts/preview':'drafts.preview','/api/hr/job-drafts':'drafts.create','/api/hr/job-drafts/archive':'drafts.archive'})[p];if(!capability)throw {status:404};access.requireCapability(principal,capability);
   if(p==='/api/hr/job-drafts/archive'){const b=await body(req);await drafts.archive(b.id,s);return reply(res,200,{ok:true});}
   if(p!=='/api/hr/job-drafts'&&p!=='/api/hr/job-drafts/preview')throw {status:404};
   const b=await body(req,160000),catalog=await readCatalog(true),prepared=prepareDraft(b,catalog);
@@ -72,11 +78,11 @@ export function createHandler(config,dependencies={}){
  if(req.method==='GET'&&p==='/auth/lark/callback'){
   const state=u.searchParams.get('state'),saved=cookies(req).muke_oauth;const flow=pending.get(state);if(!state||state!==saved||!flow)throw {status:403};pending.delete(state);if(!u.searchParams.get('code'))throw {status:400};const user=await getUser(u.searchParams.get('code'),flow.verifier,config);
   if(!user||typeof user.open_id!=='string'||!user.open_id||typeof user.tenant_key!=='string'||!user.tenant_key)throw {status:403};
-  const approved=authorizedHR(user,config);if(!approved&&(!identitySetup||(config.tenant&&user.tenant_key!==config.tenant)))throw {status:403};
-  const seconds=approved?14400:600;const id=sessions.set({role:approved?'hr':'identity',name:user.name||user.en_name||'Lark 用户',openId:user.open_id,tenant:user.tenant_key},seconds*1000);return redirect(res,config.hrOrigin+'/hr/',{'Set-Cookie':[cookie('muke_session',id,seconds),cookie('muke_oauth','',0)]});
+  const approved=await access.resolve(user);if(!approved&&(!identitySetup||(config.tenant&&user.tenant_key!==config.tenant)))throw {status:403};
+  const seconds=approved?14400:600;const id=sessions.set({role:approved?'hr':'identity',name:user.name||user.en_name||'Lark 用户',openId:user.open_id,tenant:user.tenant_key,...(approved?{accessRole:approved.accessRole,accessVersion:approved.accessVersion}:{})},seconds*1000);return redirect(res,config.hrOrigin+'/hr/',{'Set-Cookie':[cookie('muke_session',id,seconds),cookie('muke_oauth','',0)]});
  }
  if(req.method==='GET'&&p==='/api/hr/workspace'){
-  const s=sessions.get(cookies(req).muke_session);if(!s||s.role!=='hr'||!authorizedHR({open_id:s.openId,tenant_key:s.tenant},config))throw {status:401};if(!config.base)throw {status:503};const base='https://mukestar.jp.larksuite.com/base/'+encodeURIComponent(config.base);return reply(res,200,{name:s.name,mode:'lark-handoff',links:[{title:'岗位管理',label:'在招岗位 · 变更草稿',url:'/hr/jobs/'},{title:'简历跟进',label:'A05 · 候选人简历',url:base+'?table=tblyxgrrFk1Jzy6e'},{title:'面试评估',label:'A08 · 面试记录',url:base+'?table=tblQKNfszw1LKvUJ'},{title:'招聘总评',label:'A09 · 综合评估',url:base+'?table=tbl53EDnftILW69E'},{title:'员工档案',label:'H01 · 入职与人员档案',url:base+'?table=tbl0IXzgKcVRJetS'},{title:'星探管理',label:'A04 · 推荐渠道',url:base+'?table=tbloM0cxrKR4kOyC'}]});
+  access.requireCapability(principal,'workspace.view');if(!config.base)throw {status:503};return reply(res,200,{name:s.name,mode:'lark-handoff',accessRole:principal.accessRole,roleLabel:principal.label,links:workspaceLinks(principal,config.base)});
  }
  if(req.method!=='GET'&&req.method!=='HEAD')throw {status:405};
  if(req.method==='HEAD'){if(p!=='/healthz')throw {status:405};res.writeHead(200);return res.end();}
@@ -91,7 +97,7 @@ export function createHandler(config,dependencies={}){
  if(['/partner/','/hr/','/hr/setup.html','/hr/jobs/'].includes(p))return file(res,path.join(HERE,'web'),p==='/partner/'?'partner.html':p==='/hr/'?'hr.html':p==='/hr/jobs/'?'jobs.html':'setup.html');
  if(['/assets/platform.css','/assets/platform.js','/assets/jobs.css','/assets/jobs.js'].includes(p))return file(res,path.join(HERE,'web'),path.basename(p));
  throw {status:404};
- }catch(e){const status=e.status||(e.code==='ENOENT'?404:502);reply(res,status,{error:({400:'Invalid request',401:'Login required or credentials invalid',403:'Access denied',404:'Not found',405:'Method not allowed',409:'Refresh required',413:'Request too large',415:'JSON required',429:'Too many attempts. Try again later.',503:'Integration not configured'})[status]||'Service temporarily unavailable',...(e.jobCode?{code:e.jobCode}:{})});}
+ }catch(e){const status=e.status||(e.code==='ENOENT'?404:502);reply(res,status,{error:({400:'Invalid request',401:'Login required or credentials invalid',403:'Access denied',404:'Not found',405:'Method not allowed',409:'Refresh required',413:'Request too large',415:'JSON required',429:'Too many attempts. Try again later.',503:'Integration not configured'})[status]||'Service temporarily unavailable',...(e.jobCode||e.accessCode?{code:e.jobCode||e.accessCode}:{})});}
  };
 }
 export function createApp(config,dependencies={}){return http.createServer(createHandler(config,dependencies));}

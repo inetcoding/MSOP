@@ -5,6 +5,7 @@ test "$(id -u)" -eq 0 || { echo 'Run this preparation step as root.'; exit 1; }
 test -f ../../../muke/portal/index.html
 test -f ../../../muke/data/jobs.json
 test -f ../../../muke/data/manual.json
+install -d -m 0750 -o 1000 -g 1000 /var/lib/muke-access
 install -d -m 0750 -o 1000 -g 1000 /var/lib/muke-drafts
 install -d -m 0750 -o 1000 -g 1000 /var/lib/muke
 if [ ! -e /var/lib/muke/seed ]; then
