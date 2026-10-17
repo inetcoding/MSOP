@@ -1,0 +1,71 @@
+name: muke
+services:
+  app:
+    build: ..
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      MUKE_REPO: /muke
+      MUKE_PRIVATE_DATA: /data
+    ports:
+      - "127.0.0.1:8080:3000"
+    volumes:
+      - ../../../muke:/muke:ro
+      - /var/lib/muke:/data:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    pids_limit: 100
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "3"}
+  sync:
+    build: ..
+    command: [node, sync.mjs]
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      MUKE_REPO: /muke
+      MUKE_PRIVATE_DATA: /data
+    volumes:
+      - ../../../muke:/muke:ro
+      - /var/lib/muke:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "3"}
+  caddy:
+    image: caddy:2-alpine
+    profiles: [public]
+    restart: unless-stopped
+    env_file: .env
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "3"}
+volumes:
+  caddy_data:
+  caddy_config:

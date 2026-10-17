@@ -1,0 +1,8 @@
+# Do not enable access logs containing candidate query strings or OAuth codes.
+{$JOBS_HOST:jobs.muke.media}, {$HR_HOST:hr.muke.media} {
+  encode zstd gzip
+  header Strict-Transport-Security "max-age=31536000"
+  reverse_proxy app:3000 {
+    header_up X-Real-IP {remote_host}
+  }
+}
