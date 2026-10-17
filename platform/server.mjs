@@ -44,6 +44,10 @@ export function createHandler(config,dependencies={}){
  }
  let principal=null,s=null;
  if(p.startsWith('/api/hr/')){s=sessions.get(cookies(req).muke_session);principal=await access.current(s);if(!principal){if(s?.role==='hr')sessions.delete(cookies(req).muke_session);throw {status:401};}}
+ async function requireCurrent(capability){
+  const id=cookies(req).muke_session,live=sessions.get(id),current=await access.current(live);
+  if(!current||sessions.get(id)!==live)throw {status:401};access.requireCapability(current,capability);
+ }
  if(req.method==='GET'&&p==='/api/hr/access'){access.requireCapability(principal,'workspace.view');return reply(res,200,{role:principal.accessRole,label:principal.label,capabilities:principal.capabilities});}
  if(p==='/api/hr/jobs'||p.startsWith('/api/hr/job-drafts')){
   if(!limiter.take('jobs:'+s.openId,120,60000))throw {status:429};
@@ -51,15 +55,19 @@ export function createHandler(config,dependencies={}){
    access.requireCapability(principal,'jobs.read');
    const catalog=await readCatalog();let published=null;try{const snapshot=await jsonFile('jobs.json');published={stamp:snapshot.stamp||'',names:snapshot.jobs.filter(j=>j.open).map(j=>j.cn)};}catch{}
    let sync=null;try{const s=JSON.parse(await fs.readFile(path.join(config.data,'sync-status.json'),'utf8'));sync={ok:s.ok===true,attemptAt:s.at||null,lastSuccessAt:s.lastSuccessAt||(s.ok?s.at:null)};}catch{}
-   return reply(res,200,{...catalog,published,sync,drafts:await drafts.list(catalog)});
+   const savedDrafts=await drafts.list(catalog);
+   // A slow upstream read must not outlive logout or a policy change.
+   // Resolve the session again: the object captured before await can be stale.
+   await requireCurrent('jobs.read');
+   return reply(res,200,{...catalog,published,sync,drafts:savedDrafts});
   }
   if(req.method!=='POST')throw {status:405};if(!allowedOrigin(req,[config.hrOrigin]))throw {status:403};
   const capability=({'/api/hr/job-drafts/preview':'drafts.preview','/api/hr/job-drafts':'drafts.create','/api/hr/job-drafts/archive':'drafts.archive'})[p];if(!capability)throw {status:404};access.requireCapability(principal,capability);
-  if(p==='/api/hr/job-drafts/archive'){const b=await body(req);await drafts.archive(b.id,s);return reply(res,200,{ok:true});}
+  if(p==='/api/hr/job-drafts/archive'){const b=await body(req);await requireCurrent(capability);await drafts.archive(b.id,s,()=>requireCurrent(capability));return reply(res,200,{ok:true});}
   if(p!=='/api/hr/job-drafts'&&p!=='/api/hr/job-drafts/preview')throw {status:404};
-  const b=await body(req,160000),catalog=await readCatalog(true),prepared=prepareDraft(b,catalog);
+  const b=await body(req,160000),catalog=await readCatalog(true);await requireCurrent(capability);const prepared=prepareDraft(b,catalog);
   if(p.endsWith('/preview'))return reply(res,200,prepared);
-  return reply(res,201,publicDraft(await drafts.create(prepared,s),catalog));
+  const savedDraft=await drafts.create(prepared,s,()=>requireCurrent(capability));await requireCurrent(capability);return reply(res,201,publicDraft(savedDraft,catalog));
  }
  if(req.method==='POST'&&p==='/api/logout'){if(!allowedOrigin(req,origins))throw {status:403};sessions.delete(cookies(req).muke_session);return reply(res,200,{ok:true},{'Set-Cookie':cookie('muke_session','',0)});}
  if(req.method==='POST'&&p==='/api/partner/login'){

@@ -141,3 +141,9 @@ This stage intentionally does not copy Base's full row/field policy into code or
 Without a configured policy file, the existing explicit administrator IDs retain bootstrap compatibility. Production uses the private file. Role or membership expansion requires separate review; do not add staff to the administrator list as a shortcut.
 
 Verification includes real request-handler tests for handoff-role isolation, denied spoofed role payloads, unlisted/wrong-company login rejection, policy failures without administrator fallback, immediate rejection of stale sessions, fresh re-login, and absence of publish/permission-management endpoints. These use synthetic identities and do not alter production permissions or data.
+
+### Base integration decision and in-flight revocation
+
+See [permissions-integration.md](permissions-integration.md) for the verified role samples and the revised integration plan. Lark's current record-search documentation warns that a caller without management access may receive an empty successful response when advanced permissions are enabled. A user access token is therefore not sufficient evidence that the employee's row/field/view permissions can be reproduced through this API. No new user scope or employee data endpoint is enabled.
+
+Job responses and draft previews recheck the live session and current policy after upstream reads. Draft writes recheck authorization after leaving the queue and immediately before atomic replacement. Revocation or logout while work is pending blocks that work at the next check and preserves previously saved drafts. Operations already committed are not rolled back by a later policy change. Four additional tests cover in-flight read revocation, logout during draft listing, revocation during preview/create, and queued/staged write rejection including temporary-file cleanup. All 27 tests pass locally; server verification is required before deployment.

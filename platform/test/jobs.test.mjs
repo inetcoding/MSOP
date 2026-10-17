@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,readFile} from 'node:fs/promises';
+import {mkdtemp,rm,readFile,readdir} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {Readable} from 'node:stream';
@@ -35,6 +35,20 @@ test('private draft persistence is atomic, deduplicated, survives restart and ke
 test('Lark reader refuses unexpected field types and never submits business writes',async()=>{
  const calls=[];const reader=createCatalogReader({readAppId:'fixture',readAppSecret:'fixture',base:'fixture'},async(url,options)=>{calls.push([url,options]);if(url.includes('tenant_access_token'))return {tenant_access_token:'fixture-token',expire:7200};if(url.includes('/fields'))return {data:{items:[{field_name:'Goal',type:20}],has_more:false}};throw Error('Unexpected API');});
  await assert.rejects(reader(),e=>e.jobCode==='schema_changed');assert.equal(calls.length,2);assert.ok(calls.every(([url])=>url.includes('tenant_access_token')||url.includes('/fields')));
+});
+
+test('queued or staged drafts cannot commit after authorization is revoked',async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'muke-jobs-'));try{
+  const store=new DraftStore(root),{catalog}=fixture(),actor={name:'Fixture',openId:'fixture'},prepared=prepareDraft(proposal(catalog),catalog);
+  const existing=await store.create(prepared,actor),before=await readFile(store.file,'utf8');
+  const release=Promise.withResolvers();store.queue=release.promise;
+  const queued=store.create({...prepared,kind:'queued'},actor,async()=>{throw {status:401};});
+  const denial=assert.rejects(queued,e=>e.status===401);release.resolve();await denial;
+  let checks=0;await assert.rejects(store.archive(existing.id,actor,async()=>{if(++checks===2)throw {status:401};}),e=>e.status===401);
+  assert.equal(checks,2);assert.equal(await readFile(store.file,'utf8'),before);
+  assert.deepEqual(await readdir(root),['job-drafts.json']);
+  await store.archive(existing.id,actor,async()=>{});assert.equal((await store.list(catalog))[0].state,'archived');
+ }finally{if(path.dirname(root)!==path.resolve(os.tmpdir())||!path.basename(root).startsWith('muke-jobs-'))throw Error('Unsafe cleanup');await rm(root,{recursive:true,force:true});}
 });
 test('HR API protects drafts from anonymous access and CSRF; preview never persists; no publish endpoint',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'muke-jobs-'));try{

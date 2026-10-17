@@ -5,12 +5,12 @@ import {createHandler,configFromEnv} from '../server.mjs';
 import {createAccessControl} from '../access.mjs';
 
 const origin='https://hr.example.test';
-function harness(){
+function harness({beforeCatalog=async()=>{},beforeDraftList=async()=>{}}={}){
  const config={...configFromEnv({}),production:true,hrOrigin:origin,jobsOrigin:'https://jobs.example.test',tenant:'fixture-company',appId:'fixture-login-app',appSecret:'fixture-secret',base:'fixture-base',hrIds:['owner'],accessFile:'/fixture/private-policy.json'};
  let policy={version:1,revision:'fixture-1',tenant:config.tenant,loginAppId:config.appId,subjects:['owner','hr','agent','manager','finance','employee'].map(role=>({openId:role,role,active:true}))},raw=null,unavailable=false,reads=0,writes=0;
  const accessOptions={readPolicy:async()=>{if(unavailable)throw Error('Unavailable');return raw??JSON.stringify(policy);}};
  const catalog={jobs:[],options:{},unmappedRequirements:0};
- const handler=createHandler(config,{accessOptions,oauthUser:async code=>({open_id:code,tenant_key:code==='outsider'?'other-company':config.tenant,name:'Fixture User'}),readCatalog:async()=>{reads++;return catalog;},draftStore:{list:async()=>[],create:async()=>{writes++;},archive:async()=>{writes++;}}});
+ const handler=createHandler(config,{accessOptions,oauthUser:async code=>({open_id:code,tenant_key:code==='outsider'?'other-company':config.tenant,name:'Fixture User'}),readCatalog:async()=>{reads++;await beforeCatalog();return catalog;},draftStore:{list:async()=>{await beforeDraftList();return [];},create:async()=>{writes++;},archive:async()=>{writes++;}}});
  async function request(url,{method='GET',cookie='',body,headers={}}={}){
   const req=Readable.from(body===undefined?[]:[Buffer.from(JSON.stringify(body))]);req.url=url;req.method=method;req.headers={cookie,origin,'content-type':'application/json',...headers};req.socket={remoteAddress:'fixture'};
   let status=200,text='';const responseHeaders=new Map();
@@ -86,4 +86,31 @@ test('a policy revision change revokes sessions and permits a fresh approved log
  const h=harness(),first=await h.login('owner');h.policy.revision='fixture-2';
  assert.equal((await h.request('/api/hr/workspace',{cookie:first.cookie})).status,401);
  const next=await h.login('owner');assert.equal(next.status,303);assert.equal((await h.request('/api/hr/workspace',{cookie:next.cookie})).status,200);
+});
+
+test('revocation during an upstream read prevents the in-flight response from returning data',async()=>{
+ const entered=Promise.withResolvers(),release=Promise.withResolvers();
+ const h=harness({beforeCatalog:async()=>{entered.resolve();await release.promise;}}),{cookie}=await h.login('owner');
+ const response=h.request('/api/hr/jobs',{cookie});await entered.promise;
+ h.policy.subjects[0].active=false;release.resolve();
+ const denied=await response;assert.equal(denied.status,401);assert.equal(denied.body.jobs,undefined);assert.equal(denied.body.drafts,undefined);
+ assert.deepEqual(h.counters(),{reads:1,writes:0});
+});
+
+test('logout while draft listing is pending prevents the in-flight response from returning data',async()=>{
+ const entered=Promise.withResolvers(),release=Promise.withResolvers();
+ const h=harness({beforeDraftList:async()=>{entered.resolve();await release.promise;}}),{cookie}=await h.login('owner');
+ const response=h.request('/api/hr/jobs',{cookie});await entered.promise;
+ assert.equal((await h.request('/api/logout',{cookie,method:'POST'})).status,200);release.resolve();
+ const denied=await response;assert.equal(denied.status,401);assert.equal(denied.body.jobs,undefined);assert.equal(denied.body.drafts,undefined);
+});
+
+test('revocation during a draft source read prevents preview or persistence',async()=>{
+ for(const endpoint of ['/api/hr/job-drafts/preview','/api/hr/job-drafts']){
+  const entered=Promise.withResolvers(),release=Promise.withResolvers();
+  const h=harness({beforeCatalog:async()=>{entered.resolve();await release.promise;}}),{cookie}=await h.login('owner');
+  const response=h.request(endpoint,{cookie,method:'POST',body:{}});await entered.promise;
+  h.policy.subjects[0].active=false;release.resolve();
+  assert.equal((await response).status,401);assert.equal(h.counters().writes,0);
+ }
 });
