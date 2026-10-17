@@ -95,3 +95,10 @@ Live field inspection confirmed 16 A01 requirements and 51 H28 registry rows. A0
 - There is deliberately no publish/write-to-Lark endpoint. Approvals, live A01 changes, the public generator, existing GitHub sync and candidate form return settings stay as they were. No public route serves draft files.
 
 Before deploying this stage, create `/var/lib/muke-drafts` owned by UID/GID 1000 with mode 0750, then rebuild only `app`. This does not require restarting the sync worker. App restart expires existing HR sessions; sign in with Lark again. Local test fixture persistence is verified in a writable workspace temporary directory; tests do not create business records.
+
+### Verified deployment result
+
+The draft-only job stage was deployed from commit `7be28edcc6989bd577beef8fc342acabcb485866`. Both Windows workspace tests and the Debian container passed all 11 tests. The live read returned 36 H22 positions, 16 A01 requirements, 7 open positions/7 active batches, and zero unmatched A01 positions. All 7 open positions have unique, non-disabled HTTPS Lark CV/background/exam registry links; actual form return behavior remains unverified.
+
+The allowlisted owner signed in successfully after the app restart. Browser verification passed for the live catalog, search, existing batch details and a non-persisted change preview. The test preview was closed without saving; the live draft count remained zero. The 390px layout had no horizontal overflow. Anonymous job/draft APIs returned 401 and the private draft filename returned 404. Existing application redirects retained the entire referral query. The sync worker was not restarted.
+
